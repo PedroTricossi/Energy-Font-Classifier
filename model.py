@@ -1,6 +1,8 @@
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
+from attention_models import CrossViT, ViT
 
 
 class Swish(nn.Module):
@@ -45,27 +47,39 @@ class ShallowCNN(nn.Module):
         x = x.view(x.size(0), -1)
         return x
 
+
 class Unconditional_JEM(nn.Module):
     def __init__(self, hidden_features=32, num_classes=42, **kwargs):
         super(Unconditional_JEM, self).__init__()
-        self.f = ShallowCNN(hidden_features, num_classes, **kwargs)
-        self.energy_output = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(self.f.c_hid3 * 4, 1)
-        ) 
-        self.class_output = self.fc_layers = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(self.f.c_hid3 * 4, num_classes)
+        # self.f = ShallowCNN(hidden_features, num_classes, **kwargs)
+        dim = 224
+        num_classes = 42
+
+        self.f = ViT(image_size=56, patch_size=28, num_classes=42, dim=224,
+                     dim_head=28,
+                     depth=6, heads=8, mlp_dim=2048, dropout=0.1,
+                     emb_dropout=0.1, channels=1)
+
+        self.mlp_energy_head = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, 1)
         )
 
+        self.mlp_head = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, num_classes)
+        )
+
+
     def forward(self, x, y=None):
-        penult_z = self.f(x)
-        return self.energy_output(penult_z).squeeze()
+        x = self.f(x)
+        return self.mlp_energy_head(x).squeeze()
 
     def classify(self, x):
-        penult_z = self.f(x)
-        return self.class_output(penult_z).squeeze()
-    
+        x = self.f(x)
+        return self.mlp_head(x).squeeze()
+
+
 class Conditional_JEM(Unconditional_JEM):
     def __init__(self, hidden_features=32, num_classes=42, **kwargs):
         super(Conditional_JEM, self).__init__(hidden_features, num_classes, **kwargs)

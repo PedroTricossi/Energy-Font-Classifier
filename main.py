@@ -1,4 +1,4 @@
-## Standard libraries
+# Standard libraries
 import os
 import numpy as np
 import tqdm
@@ -6,14 +6,14 @@ import pandas as pd
 import argparse
 from typing import Union, Dict
 import random
-## Imports for plotting
+# Imports for plotting
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-## Imports for data loading
+# Imports for data loading
 from pathlib import Path
 
-## PyTorch & DL
+# PyTorch & DL
 import torch
 import torch.utils.data as data
 import torch.optim as optim
@@ -29,14 +29,13 @@ torch.backends.cudnn.benchmark = False
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 print(f"Using device: {device}")
 
-## Misc
+# Misc
 from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_curve, auc
 from sklearn.preprocessing import LabelEncoder
 
-from ex03_data import get_datasets, TransformTensorDataset
-from ex03_model import ShallowCNN, Conditional_JEM, Unconditional_JEM
-from ex03_ood import score_fn
-import seaborn as sns
+from dataset import get_datasets, TransformTensorDataset
+from model import Conditional_JEM, Unconditional_JEM
+from ood import score_fn
 import seaborn as sns
 
 
@@ -102,14 +101,15 @@ class MCMCSampler:
         inp_imgs = torch.cat([rand_imgs, old_imgs], dim=0).detach().to(device)
 
         # Perform MCMC sampling
-        inp_imgs = self.synthesize_samples(model=self.model, inp_imgs=inp_imgs, steps=steps, step_size=step_size, clabel=clabel)
+        inp_imgs = self.synthesize_samples(model=self.model, inp_imgs=inp_imgs, steps=steps,
+                                           step_size=step_size, clabel=clabel)
 
         # Add new images to the buffer and remove old ones if needed
         self.examples = list(inp_imgs.to(torch.device("cpu")).chunk(self.sample_size, dim=0)) + self.examples
         self.examples = self.examples[:self.cbuffer_size]
         return inp_imgs
 
-    def synthesize_samples(self,model, inp_imgs, clabel=None, steps=60, step_size=10, return_img_per_step=False):
+    def synthesize_samples(self, model, inp_imgs, clabel=None, steps=60, step_size=10, return_img_per_step=False):
         """
         Synthesize images from the current parameterized q_\theta
 
@@ -139,7 +139,7 @@ class MCMCSampler:
         imgs_per_step = []
 
         # Execute K MCMC steps
- # Loop over K (steps)
+        # Loop over K (steps)
         for _ in range(steps):
             # Part 1: Add noise to the input.
             noise.normal_(0, 0.005)
@@ -153,7 +153,7 @@ class MCMCSampler:
                 out_imgs = -model(inp_imgs, clabel)
 
             out_imgs.sum().backward()
-            inp_imgs.grad.data.clamp_(-0.03, 0.03) # For stabilizing and preventing too high gradients
+            inp_imgs.grad.data.clamp_(-0.03, 0.03)  # For stabilizing and preventing too high gradients
 
             # Apply gradients to our current samples
             inp_imgs.data.add_(-step_size * inp_imgs.grad.data)
@@ -206,11 +206,16 @@ class JEM(pl.LightningModule):
         # end of each epoch.
         #         self.log_dict(self.train_metrics, on_step=False, on_epoch=True)
         # Please refer to the torchmetrics documentation if this process is not clear.
-        metrics = torchmetrics.MetricCollection([torchmetrics.CohenKappa(num_classes=num_classes,task='multiclass'),
-                                                 torchmetrics.AveragePrecision(num_classes=num_classes,task='multiclass'),
-                                                 torchmetrics.AUROC(num_classes=num_classes,task='multiclass'),
-                                                 torchmetrics.MatthewsCorrCoef(num_classes=num_classes,task='multiclass'),
-                                                 torchmetrics.CalibrationError(task='multiclass',num_classes=num_classes)])
+        metrics = torchmetrics.MetricCollection([torchmetrics.CohenKappa(num_classes=num_classes,
+                                                                         task='multiclass'),
+                                                 torchmetrics.AveragePrecision(num_classes=num_classes,
+                                                                               task='multiclass'),
+                                                 torchmetrics.AUROC(num_classes=num_classes,
+                                                                    task='multiclass'),
+                                                 torchmetrics.MatthewsCorrCoef(num_classes=num_classes,
+                                                                               task='multiclass'),
+                                                 torchmetrics.CalibrationError(task='multiclass',
+                                                                               num_classes=num_classes)])
         dyna_metrics = [torchmetrics.Accuracy,
                         torchmetrics.Precision,
                         torchmetrics.Recall,
@@ -221,11 +226,14 @@ class JEM(pl.LightningModule):
         self.valid_metrics = metrics.clone(prefix='val_')
         for mode in ['micro', 'macro']:
             self.train_metrics.add_metrics(
-                {f"{mode}_{m.__name__}": m(average=mode, num_classes=num_classes,task='multiclass') for m in dyna_metrics})
+                {f"{mode}_{m.__name__}": m(average=mode, num_classes=num_classes,
+                                           task='multiclass') for m in dyna_metrics})
             self.valid_metrics.add_metrics(
-                {f"{mode}_{m.__name__}": m(average=mode, num_classes=num_classes,task='multiclass') for m in dyna_metrics})
+                {f"{mode}_{m.__name__}": m(average=mode, num_classes=num_classes,
+                                           task='multiclass') for m in dyna_metrics})
 
-        self.hp_metric = torchmetrics.AveragePrecision(num_classes=num_classes,task='multiclass')
+        self.hp_metric = torchmetrics.AveragePrecision(num_classes=num_classes,
+                                                       task='multiclass')
 
     def forward(self, x, labels=None):
         z = self.cnn(x, labels)
@@ -242,13 +250,12 @@ class JEM(pl.LightningModule):
                                               gamma=self.hparams.lr_gamma)
         return [optimizer], [scheduler]
 
-    def px_step(self, batch, ccond_sample=False):
+    def px_step(self, batch):
         # TODO (3.4): Implement p(x) step.
         # In addition to calculating the contrastive loss, also consider using an L2 regularization loss. This allows us
         # to constrain the Lipshitz constant by penalizes too large energies and makes sure that the energiers maintain
         # similar magnitudes across epochs.
         # E.g.:
-        loss = torch.tensor(0.0, device=self.device)
         # if not ccond_sample:
         real_imgs, real_label = batch
         small_noise = torch.randn_like(real_imgs) * 0.005
@@ -289,9 +296,7 @@ class JEM(pl.LightningModule):
 
         return loss_x_y
 
-
     def training_step(self, batch, batch_idx):
-
         loss_px = self.px_step(batch)
         
         loss_pyx = self.pyx_step(batch)
@@ -313,12 +318,13 @@ class JEM(pl.LightningModule):
         fake_imgs = torch.rand_like(real_imgs) * 2 - 1
         
         inp_imgs = torch.cat([real_imgs, fake_imgs], dim=0)
-        real_out, fake_out = self.cnn(inp_imgs).chunk(2, dim=0)
+        real_out = self.cnn(real_imgs)
+        fake_out = self.cnn(fake_imgs)
         
-        cdiv = fake_out.mean() - real_out.mean()
-        self.log('val_contrastive_divergence', cdiv)
-        self.log('val_fake_out', fake_out.mean())
-        self.log('val_real_out', real_out.mean())
+        cdiv = fake_out - real_out
+        # self.log('val_contrastive_divergence', cdiv)
+        # self.log('val_fake_out', fake_out.mean())
+       # self.log('val_real_out', real_out)
 
 
 def run_training(args) -> pl.LightningModule:
@@ -413,7 +419,7 @@ def run_generation(args, ckpt_path: Union[str, Path], conditional: bool = False)
 
     k = 8
     bs = 8
-    num_steps = 256
+    num_steps = 512
     conditional_labels = [1, 4, 5, 10, 17, 18, 39, 23]
 
     synth_imgs = []
@@ -530,16 +536,16 @@ if __name__ == '__main__':
     args = parse_args()
 
     # 1) Run training
-    run_training(args)
+    #run_training(args)
 
     # 2) Evaluate model
-    ckpt_path: str = "saved_models/lightning_logs/version_14/checkpoints/val_condiv_epoch=48-step=17297.ckpt"
+    ckpt_path: str = "saved_models/lightning_logs/version_47/checkpoints/val_condiv_epoch=10-step=3883.ckpt"
     # Classification performance
     run_evaluation(args, ckpt_path)
 
     # # # Image synthesis
-    run_generation(args, ckpt_path, conditional=True)
-    # run_generation(args, ckpt_path, conditional=False)
+    #run_generation(args, ckpt_path, conditional=True)
+    run_generation(args, ckpt_path, conditional=False)
 
     # # OOD Analysis
     run_ood_analysis(args, ckpt_path)
